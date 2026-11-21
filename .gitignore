@@ -24,3 +24,4 @@ results-survey*.csv
 .Rhistory
 .RData
 .Rproj.user/
+!report/*.html
