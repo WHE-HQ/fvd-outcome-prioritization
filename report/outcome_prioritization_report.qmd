@@ -1,0 +1,314 @@
+---
+title: "FVD therapeutics guideline: outcome prioritization"
+author: "Antoine Chaillon · WHO Clinical Management & Operations"
+format:
+  dashboard:
+    theme: [cosmo, who.scss]
+    logo: assets/who-logo-white.png
+    orientation: rows
+    scrolling: true
+    embed-resources: true
+    nav-buttons:
+      - icon: envelope
+        href: mailto:chaillona@who.int
+        aria-label: Contact
+params:
+  data_dir: "data"            # folder holding the exports from the dataform
+  results_file: ""            # "" = newest results-survey*.csv in data_dir
+  participants_file: ""       # optional; "" = newest tokens_*.csv in data_dir (gives the invited denominator)
+  show_personal: true         # false = no free-text comments, no names, no Excel download
+  exclude_tokens: ""          # access codes of test replies to leave out, e.g. "abc123; def456"
+  consensus_in_tier: 70       # consensus: >= this % of raters score in a tier ...
+  consensus_max_opposite: 15  # ... and < this % score in the opposite tier
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+## TERMINAL (from this folder)
+# quarto render outcome_prioritization_report.qmd
+# quarto render outcome_prioritization_report.qmd -P show_personal:false -o outcome_prioritization_public.html
+
+suppressPackageStartupMessages({
+  library(data.table); library(plotly); library(DT); library(htmltools); library(bslib); library(openxlsx)
+})
+
+WHO <- c(blue = "#009ADE", navy = "#00205C", sky = "#5BC2E7", green = "#80BC00",
+         orange = "#F26829", purple = "#A6228C", amber = "#F2A900", grey = "#8A94A6")
+TIERS <- c("Limited (1-3)", "Important (4-6)", "Critical (7-9)")
+TIER_COL <- setNames(c("#86b6ef", "#2a78d6", "#104281"), TIERS)   # one-hue ordinal ramp, light -> dark
+
+# Outcome codes and names exactly as in the survey (OUTCOMES[O01] ... OUTCOMES[O21])
+OUTCOMES <- data.table(code = sprintf("O%02d", 1:21), outcome = c(
+  "Mortality", "Organ failure", "Ventilation", "Need for vasopressors", "Need for renal replacement therapy",
+  "Hospitalization", "Progression to severe disease", "Duration of admission / hospital length of stay",
+  "Relief of symptoms", "Time to symptom resolution / length of symptoms",
+  "Functional status after acute disease (quality of life after discharge)", "Stigma and mental health issues",
+  "Time to viral clearance", "Risk of onward transmission [proxy marker: viral persistence]", "Serious adverse events",
+  "Adverse maternal outcomes", "Adverse perinatal outcomes", "Adverse events related to therapeutics",
+  "Interruption of treatment", "Need for antibiotics", "Uveitis"))
+
+blank <- function(x) is.na(x) | trimws(x) == ""
+newest <- function(dir, pat) { f <- list.files(dir, pat, full.names = TRUE, ignore.case = TRUE); if (length(f)) f[which.max(file.mtime(f))] else NA }
+read_any <- function(f) {
+  first <- readLines(f, n = 1, encoding = "UTF-8", warn = FALSE)
+  sep <- if (lengths(regmatches(first, gregexpr(";", first))) > lengths(regmatches(first, gregexpr(",", first)))) ";" else ","
+  d <- fread(f, sep = sep, colClasses = "character", encoding = "UTF-8", na.strings = NULL, check.names = FALSE)
+  setnames(d, trimws(sub("^﻿", "", names(d)))); d
+}
+
+# ---- files ---------------------------------------------------------------------
+rfile <- if (nzchar(params$results_file)) params$results_file else newest(params$data_dir, "^results.*\\.csv$")
+pfile <- if (nzchar(params$participants_file)) params$participants_file else newest(params$data_dir, "^tokens_.*\\.csv$")
+if (is.na(rfile)) stop("No results export (results*.csv) found in ", params$data_dir)
+R <- read_any(rfile)
+P <- if (!is.na(pfile)) read_any(pfile) else NULL
+
+# ---- columns, whether exported with question codes or question text --------------
+col <- function(code, text) { h <- names(R); k <- grep(code, h, perl = TRUE)
+  if (!length(k)) k <- grep(text, h, perl = TRUE, ignore.case = TRUE); if (length(k)) h[k[1]] else NA_character_ }
+c_submit <- col("^submitdate$", "^Date submitted$"); c_token <- col("^token$", "^Access code$")
+c_comment <- col("^COMMENTS$", "comments on the outcomes")
+ocol <- vapply(seq_len(nrow(OUTCOMES)), function(i) {
+  k <- which(names(R) == paste0("OUTCOMES[", OUTCOMES$code[i], "]") | names(R) == paste0("OUTCOMES_", OUTCOMES$code[i]))
+  if (!length(k)) k <- which(endsWith(names(R), paste0("[", OUTCOMES$outcome[i], "]")))
+  if (length(k)) names(R)[k[1]] else NA_character_ }, character(1))
+OUTCOMES[, column := ocol]
+if (all(is.na(ocol))) stop("No outcome columns found in ", basename(rfile))
+OUTCOMES <- OUTCOMES[!is.na(column)]
+
+g <- function(c) if (is.na(c)) rep(NA_character_, nrow(R)) else as.character(R[[c]])
+resp <- data.table(token = g(c_token), submitted = as.POSIXct(g(c_submit), tz = "UTC", format = "%Y-%m-%d %H:%M:%S"),
+                   comment = trimws(gsub("\\s+", " ", g(c_comment))))
+for (i in seq_len(nrow(OUTCOMES))) set(resp, j = OUTCOMES$code[i], value = as.integer(sub("^A", "", g(OUTCOMES$column[i]))))
+excl <- trimws(strsplit(params$exclude_tokens, "[,;[:space:]]+")[[1]]); excl <- excl[excl != ""]
+n_started <- nrow(resp[!is.na(token) | TRUE])
+resp <- resp[!is.na(submitted) & !token %chin% excl][order(submitted)]
+resp <- resp[!duplicated(token) | is.na(token) | token == ""]            # one reply per rater
+resp[, rater := sprintf("Rater %02d", .I)]                               # anonymous label, in order of reply
+n_resp <- nrow(resp)
+n_inv <- if (!is.null(P)) nrow(P) else NA_integer_
+n_open <- sum(!is.na(R[[c_token]]) & blank(g(c_submit)))
+
+long <- melt(resp, id.vars = c("rater", "token", "submitted"), measure.vars = OUTCOMES$code, variable.name = "code", value.name = "score")
+long <- long[!is.na(score)][OUTCOMES[, .(code, outcome)], on = "code", nomatch = 0]
+long[, tier := factor(fcase(score >= 7, TIERS[3], score >= 4, TIERS[2], default = TIERS[1]), levels = TIERS)]
+
+cin <- params$consensus_in_tier; cop <- params$consensus_max_opposite
+S <- long[, .(n = .N, median = median(score), q1 = quantile(score, .25), q3 = quantile(score, .75), mean = mean(score),
+              pct_lim = 100 * mean(score <= 3), pct_imp = 100 * mean(score >= 4 & score <= 6), pct_crit = 100 * mean(score >= 7)),
+          by = .(code, outcome)]
+S[, grade := fcase(median >= 7, "Critical", median >= 4, "Important", default = "Limited importance")]
+S[, consensus := fcase(pct_crit >= cin & pct_lim < cop, "Consensus: critical", pct_lim >= cin & pct_crit < cop, "Consensus: limited", default = "No consensus")]
+setorder(S, -median, -pct_crit, -mean)
+ord <- S$outcome
+
+comments <- resp[!blank(comment), .(Rater = rater, Comment = comment)]
+last_reply <- max(resp$submitted)
+
+# ---- helpers ------------------------------------------------------------------------
+vb <- function(title, value, sub = NULL, icon = "people", cls = NULL)
+  value_box(title = title, value = value, showcase = tags$i(class = paste0("bi bi-", icon)),
+            showcase_layout = showcase_top_right(width = 0.25), if (!is.null(sub)) p(sub), class = cls)
+plt <- function(p) config(p, displaylogo = FALSE,
+  modeBarButtonsToRemove = c("lasso2d", "select2d", "autoScale2d", "zoomIn2d", "zoomOut2d", "pan2d", "zoom2d"))
+lay <- function(p, ..., margin = list(l = 10, r = 10, t = 10, b = 10))
+  layout(p, font = list(family = "Arial", color = "#1F2A44", size = 12),
+         paper_bgcolor = "rgba(0,0,0,0)", plot_bgcolor = "rgba(0,0,0,0)", margin = margin, ...)
+fmt_tbl <- S[, .(Outcome = outcome, Raters = n, `Median (IQR)` = sprintf("%.1f (%.1f to %.1f)", median, q1, q3),
+                 Mean = round(mean, 1), `% 1-3` = round(pct_lim), `% 4-6` = round(pct_imp), `% 7-9` = round(pct_crit),
+                 `GRADE tier (median)` = grade, Consensus = consensus)]
+
+# ---- Excel ----------------------------------------------------------------------------
+xlsx_file <- paste0("FVD_outcome_prioritization_", format(Sys.Date(), "%Y-%m-%d"), ".xlsx")
+if (params$show_personal) {
+  wb <- createWorkbook(creator = "WHO Clinical Management & Operations")
+  modifyBaseFont(wb, fontSize = 10, fontName = "Arial")
+  hs <- createStyle(fontColour = "#FFFFFF", fgFill = WHO[["navy"]], textDecoration = "bold", wrapText = TRUE, valign = "center")
+  put <- function(sheet, dt, widths) {
+    addWorksheet(wb, sheet, gridLines = FALSE); writeData(wb, sheet, dt, headerStyle = hs, withFilter = TRUE)
+    freezePane(wb, sheet, firstRow = TRUE, firstCol = TRUE); setRowHeights(wb, sheet, 1, 30); setColWidths(wb, sheet, seq_along(widths), widths)
+  }
+  addWorksheet(wb, "Read me", gridLines = FALSE)
+  writeData(wb, "Read me", c("FVD therapeutics guideline – outcome prioritization",
+    paste0("Replies up to ", format(last_reply, "%d %b %Y %H:%M"), " UTC · ", n_resp, " raters",
+           if (!is.na(n_inv)) paste0(" of ", n_inv, " invited") else "", " · prepared by Antoine Chaillon (chaillona@who.int)"), "",
+    "Summary: one row per outcome, ordered by median score. GRADE tier follows the median (7-9 critical, 4-6 important, 1-3 limited importance).",
+    paste0("Consensus: at least ", cin, "% of raters scoring in a tier and fewer than ", cop, "% in the opposite tier."),
+    "Ratings: every score given, raters anonymised (Rater 01, 02 ... in order of reply). Shading follows the tier.",
+    "Comments: free-text comments, anonymised."))
+  addStyle(wb, "Read me", createStyle(fontSize = 14, textDecoration = "bold", fontColour = WHO[["navy"]]), rows = 1, cols = 1)
+  setColWidths(wb, "Read me", 1, 120)
+  put("Summary", fmt_tbl, c(55, 8, 18, 8, 8, 8, 8, 20, 20))
+  crit_rows <- which(S$grade == "Critical") + 1L
+  if (length(crit_rows)) addStyle(wb, "Summary", createStyle(fgFill = "#D6E6F9"), rows = crit_rows, cols = 1:9, gridExpand = TRUE, stack = TRUE)
+  rt <- dcast(long, outcome ~ rater, value.var = "score")[match(ord, outcome)]
+  setnames(rt, "outcome", "Outcome")
+  put("Ratings", rt, c(55, rep(10, ncol(rt) - 1)))
+  for (j in 2:ncol(rt)) for (tk in seq_along(TIERS)) {
+    lo <- c(1, 4, 7)[tk]; hi <- c(3, 6, 9)[tk]; rr <- which(rt[[j]] >= lo & rt[[j]] <= hi) + 1L
+    if (length(rr)) addStyle(wb, "Ratings", createStyle(fgFill = TIER_COL[[tk]], fontColour = if (tk == 1) "#1F2A44" else "#FFFFFF", halign = "center"),
+                             rows = rr, cols = j, stack = TRUE)
+  }
+  put("Comments", if (nrow(comments)) comments else data.table(Rater = character(), Comment = character()), c(12, 120))
+  if (nrow(comments)) addStyle(wb, "Comments", createStyle(wrapText = TRUE, valign = "top"), rows = 2:(nrow(comments) + 1), cols = 2, stack = TRUE)
+  saveWorkbook(wb, xlsx_file, overwrite = TRUE)
+  # Some openxlsx builds link to drawing parts they never write; drop such links so Excel opens the file cleanly.
+  fix_xlsx <- function(f) {
+    tmp <- tempfile(); dir.create(tmp); utils::unzip(f, exdir = tmp); changed <- FALSE
+    for (rf in list.files(tmp, "\\.rels$", recursive = TRUE, full.names = TRUE, all.files = TRUE)) {
+      x <- paste(readLines(rf, warn = FALSE, encoding = "UTF-8"), collapse = ""); base <- dirname(dirname(rf))
+      for (rel in regmatches(x, gregexpr("<Relationship [^>]*/>", x))[[1]]) {
+        tg <- sub('.*Target="([^"]+)".*', "\\1", rel)
+        if (grepl("^https?:", tg) || grepl('TargetMode="External"', rel)) next
+        path <- if (startsWith(tg, "/")) file.path(tmp, sub("^/", "", tg)) else file.path(base, tg)
+        if (!file.exists(path)) { x <- sub(rel, "", x, fixed = TRUE); changed <- TRUE }
+      }
+      writeLines(x, rf, useBytes = TRUE)
+    }
+    if (changed) {
+      for (sh in list.files(file.path(tmp, "xl", "worksheets"), "\\.xml$", full.names = TRUE)) {
+        x <- paste(readLines(sh, warn = FALSE, encoding = "UTF-8"), collapse = "")
+        relf <- file.path(dirname(sh), "_rels", paste0(basename(sh), ".rels"))
+        ids <- if (file.exists(relf)) sub('Id="([^"]+)"', "\\1", regmatches(paste(readLines(relf, warn = FALSE), collapse = ""), gregexpr('Id="[^"]+"', paste(readLines(relf, warn = FALSE), collapse = "")))[[1]]) else character()
+        for (tag in regmatches(x, gregexpr('<drawing r:id="[^"]+"/>', x))[[1]])
+          if (!sub('.*r:id="([^"]+)".*', "\\1", tag) %in% ids) x <- sub(tag, "", x, fixed = TRUE)
+        writeLines(x, sh, useBytes = TRUE)
+      }
+      old <- setwd(tmp); on.exit(setwd(old))
+      files <- list.files(".", recursive = TRUE, all.files = TRUE, no.. = TRUE)
+      unlink(file.path(old, f)); zip::zip(normalizePath(file.path(old, f), mustWork = FALSE), files, root = ".")
+    }
+  }
+  fix_xlsx(xlsx_file)
+}
+dl_button <- if (params$show_personal) {
+  b64 <- jsonlite::base64_enc(readBin(xlsx_file, "raw", file.info(xlsx_file)$size))
+  div(style = "padding: 4px 2px 2px 2px;",
+    tags$a(class = "btn-download", download = xlsx_file,
+           href = paste0("data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,", b64),
+           tags$i(class = "bi bi-file-earmark-excel"), " Download the results (Excel: summary, all ratings, comments)"),
+    span(class = "who-note", style = "margin-left: 12px;", paste0("replies up to ", format(last_reply, "%d %b %Y %H:%M"), " UTC")))
+} else p(class = "who-note", paste0("Replies up to ", format(last_reply, "%d %b %Y %H:%M"), " UTC"))
+```
+
+# Overview
+
+## Row {height="auto"}
+
+```{r}
+layout_column_wrap(
+  width = "200px", fill = FALSE,
+  vb("Raters", n_resp, if (!is.na(n_inv)) paste0("of ", n_inv, " invited · ", round(100 * n_resp / n_inv), "% response") else "submitted replies", "people"),
+  vb("Outcomes rated", nrow(OUTCOMES), "on a 1–9 scale", "list-ol", "vb-navy"),
+  vb("Critical (median 7–9)", sum(S$grade == "Critical"), paste(sum(S$consensus == "Consensus: critical"), "with consensus"), "exclamation-diamond", "vb-navy"),
+  vb("Important (median 4–6)", sum(S$grade == "Important"), "", "check2-square", "vb-green"),
+  vb("Limited (median 1–3)", sum(S$grade == "Limited importance"), "", "dash-square", "vb-amber"),
+  vb("Comments", nrow(comments), "free-text remarks", "chat-left-text", "vb-orange")
+)
+```
+
+## Row {height="auto"}
+
+```{r}
+dl_button
+```
+
+## Row {height=640}
+
+```{r}
+#| title: How raters classified each outcome (ordered by median score)
+ts <- long[, .N, by = .(outcome, tier)][, pct := 100 * N / sum(N), by = outcome]
+ts <- merge(CJ(outcome = ord, tier = factor(TIERS, levels = TIERS)), ts, by = c("outcome", "tier"), all.x = TRUE)
+ts[is.na(N), `:=`(N = 0L, pct = 0)]
+med <- setNames(S$median, S$outcome)
+p <- plot_ly()
+for (t in rev(TIERS)) {
+  d <- ts[tier == t]
+  p <- add_bars(p, data = d, x = ~pct, y = ~outcome, name = t, orientation = "h",
+                marker = list(color = TIER_COL[[t]], line = list(color = "#FFFFFF", width = 1.5)),
+                text = ~ifelse(pct >= 10, paste0(round(pct), "%"), ""), textposition = "inside", insidetextanchor = "middle",
+                textfont = list(color = if (t == TIERS[1]) "#1F2A44" else "#FFFFFF"),
+                customdata = ~N, hovertemplate = paste0(t, ": %{customdata} raters (%{x:.0f}%)<extra>%{y}</extra>"))
+}
+p |> lay(barmode = "stack", xaxis = list(title = "", ticksuffix = "%", range = c(0, 100), gridcolor = "#E3E9F0"),
+         yaxis = list(title = "", categoryorder = "array", categoryarray = rev(ord), automargin = TRUE),
+         legend = list(orientation = "h", y = 1.06, traceorder = "normal"), margin = list(l = 10, r = 60, t = 30, b = 10),
+         annotations = lapply(ord, function(o) list(x = 100, y = o, xanchor = "left", xshift = 6, showarrow = FALSE,
+                                                     text = sprintf("<b>%.1f</b>", med[[o]]), font = list(color = "#1F2A44", size = 11)))) |> plt()
+```
+
+## Row {height="auto"}
+
+```{r}
+p(class = "who-note", "GDG members were invited by personal link to rate each outcome from 1 to 9 (1\u20133 of limited importance; 4\u20136 important; 7\u20139 critically important), following the Core GRADE approach. ",
+  "Bars show the share of raters placing each outcome in each tier; the number on the right is the median score. ",
+  paste0("GRADE tier follows the median. Consensus = at least ", cin, "% of raters in a tier and fewer than ", cop, "% in the opposite tier."))
+```
+
+# Summary
+
+## Row {height=760}
+
+```{r}
+#| title: Summary by outcome
+fname <- paste0("FVD_outcome_summary_", format(Sys.Date(), "%Y-%m-%d"))
+datatable(fmt_tbl, rownames = FALSE, extensions = "Buttons", fillContainer = TRUE, class = "compact stripe hover",
+          options = list(dom = "Bfrtip", paging = FALSE, ordering = TRUE, scrollY = "620px", scrollCollapse = TRUE,
+                         buttons = list(list(extend = "excel", text = "⬇ Excel", filename = fname, title = ""),
+                                        list(extend = "csv", text = "⬇ CSV", filename = fname),
+                                        list(extend = "copy", text = "Copy")))) |>
+  formatStyle("GRADE tier (median)", backgroundColor = styleEqual(c("Critical", "Important", "Limited importance"), unname(rev(TIER_COL))),
+              color = styleEqual(c("Critical", "Important", "Limited importance"), c("#FFFFFF", "#FFFFFF", "#1F2A44")), fontWeight = "bold") |>
+  formatStyle("Consensus", fontWeight = styleEqual("Consensus: critical", "bold"))
+```
+
+# Ratings
+
+## Row {height=760}
+
+```{r}
+#| title: Every score, by outcome and rater (raters anonymised)
+hm <- dcast(long, outcome ~ rater, value.var = "score")[match(rev(ord), outcome)]
+z <- as.matrix(hm[, -1]); rn <- hm$outcome
+plot_ly(x = colnames(z), y = rn, z = z, type = "heatmap", zmin = 1, zmax = 9, xgap = 2, ygap = 2,
+        colorscale = list(c(0, "#EAF2FC"), c(0.33, "#86b6ef"), c(0.66, "#2a78d6"), c(1, "#104281")),
+        colorbar = list(title = "Score", tickvals = c(1, 3, 5, 7, 9), thickness = 12, len = 0.6),
+        text = z, texttemplate = "%{text}", hovertemplate = "%{y}<br>%{x}: %{z}<extra></extra>") |>
+  lay(xaxis = list(title = "", side = "top"), yaxis = list(title = "", automargin = TRUE)) |> plt()
+```
+
+```{r}
+#| title: Distribution of scores per outcome
+dist <- long[, .N, by = .(outcome, score)]
+dist <- dcast(dist, outcome ~ score, value.var = "N", fill = 0)
+for (s in as.character(1:9)) if (!s %in% names(dist)) set(dist, j = s, value = 0L)
+setcolorder(dist, c("outcome", as.character(1:9)))
+dist <- dist[match(ord, outcome)]; setnames(dist, "outcome", "Outcome")
+dmax <- max(as.matrix(dist[, -1]), 1)
+for (s in as.character(1:9)) set(dist, j = s, value = ifelse(dist[[s]] == 0, NA_integer_, dist[[s]]))
+datatable(dist, rownames = FALSE, class = "compact", options = list(dom = "t", paging = FALSE, ordering = FALSE, scrollY = "620px")) |>
+  formatStyle(as.character(1:9), background = styleColorBar(c(0, dmax), "#BFE6F7"),
+              backgroundSize = "90% 70%", backgroundRepeat = "no-repeat", backgroundPosition = "center")
+```
+
+# Comments
+
+## Row {height="auto"}
+
+```{r}
+#| title: !expr paste0("Comments from raters (", nrow(comments), ")")
+if (!params$show_personal) {
+  p(class = "who-note", "Free-text comments are not included in this version.")
+} else if (!nrow(comments)) {
+  p(class = "who-note", "No comments so far.")
+} else {
+  tags$table(class = "table table-sm", tags$tbody(lapply(seq_len(nrow(comments)), function(i)
+    tags$tr(tags$td(style = "width:90px;color:#52607A;white-space:nowrap;", comments$Rater[i]), tags$td(comments$Comment[i])))))
+}
+```

@@ -1,0 +1,16 @@
+tid,firstname,lastname,email,emailstatus,token,language,validfrom,validuntil,invited,reminded,remindercount,completed,usesleft
+1,Test1,Member,test.member1@example.org,OK,DUMMYTOKEN00001,en,,,2026-01-01 09:00,N,0,N,1
+2,Test2,Member,test.member2@example.org,OK,DUMMYTOKEN00002,en,,,2026-01-01 09:00,N,0,N,1
+3,Test3,Member,test.member3@example.org,OK,DUMMYTOKEN00003,en,,,2026-01-01 09:00,N,0,N,1
+4,Test4,Member,test.member4@example.org,OK,DUMMYTOKEN00004,en,,,2026-01-01 09:00,N,0,N,1
+5,Test5,Member,test.member5@example.org,OK,DUMMYTOKEN00005,en,,,2026-01-01 09:00,N,0,N,1
+6,Test6,Member,test.member6@example.org,OK,DUMMYTOKEN00006,en,,,2026-01-01 09:00,N,0,N,1
+7,Test7,Member,test.member7@example.org,OK,DUMMYTOKEN00007,en,,,2026-01-01 09:00,N,0,N,1
+8,Test8,Member,test.member8@example.org,OK,DUMMYTOKEN00008,en,,,2026-01-01 09:00,N,0,N,1
+9,Test9,Member,test.member9@example.org,OK,DUMMYTOKEN00009,en,,,2026-01-01 09:00,N,0,N,1
+10,Test10,Member,test.member10@example.org,OK,DUMMYTOKEN00010,en,,,2026-01-01 09:00,N,0,N,1
+11,Test11,Member,test.member11@example.org,OK,DUMMYTOKEN00011,en,,,2026-01-01 09:00,N,0,N,1
+12,Test12,Member,test.member12@example.org,OK,DUMMYTOKEN00012,en,,,2026-01-01 09:00,N,0,N,1
+13,Test13,Member,test.member13@example.org,OK,DUMMYTOKEN00013,en,,,2026-01-01 09:00,N,0,N,1
+14,Test14,Member,test.member14@example.org,OK,DUMMYTOKEN00014,en,,,2026-01-01 09:00,N,0,N,1
+15,Test15,Member,test.member15@example.org,OK,DUMMYTOKEN00015,en,,,2026-01-01 09:00,N,0,N,1

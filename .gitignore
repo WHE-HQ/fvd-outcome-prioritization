@@ -1,0 +1,26 @@
+# --- personal data: never commit ---------------------------------------------
+# Everything in report/data/ is ignored except the README and the two dummy files.
+report/data/*
+!report/data/README.md
+!report/data/tokens_000000.csv
+!report/data/results-survey000000.csv
+
+# Any other export that ends up elsewhere
+tokens_*.csv
+results-survey*.csv
+!report/data/tokens_000000.csv
+!report/data/results-survey000000.csv
+
+# --- rendered outputs (contain personal data) --------------------------------
+*.html
+*.xlsx
+# ... except the public version (rendered with -P show_personal:false)
+!report/*_public.html
+*_files/
+.quarto/
+
+# --- system / editor ---------------------------------------------------------
+.DS_Store
+.Rhistory
+.RData
+.Rproj.user/

@@ -1,0 +1,39 @@
+/*-- scss:defaults --*/
+$who-blue:  #009ADE;
+$who-navy:  #00205C;
+$who-sky:   #5BC2E7;
+$who-green: #80BC00;
+$who-amber: #F2A900;
+$who-orange:#F26829;
+
+$primary: $who-blue;
+$navbar-bg: $who-navy;
+$navbar-fg: #ffffff;
+$body-bg: #F5F7FA;
+$body-color: #1F2A44;
+$font-family-sans-serif: Arial, "Helvetica Neue", Helvetica, "Liberation Sans", sans-serif;
+$font-family-base: $font-family-sans-serif;
+$headings-font-family: $font-family-sans-serif;
+$navbar-font-family: $font-family-sans-serif;
+$web-font-path: false;
+$border-radius: 4px;
+
+/*-- scss:rules --*/
+.card { border: 1px solid #E3E9F0; box-shadow: none; }
+.card-header { background: #ffffff; color: $who-navy; font-weight: 600; border-bottom: 1px solid #E3E9F0; }
+.bslib-value-box { background: #ffffff; color: $body-color; border-left: 4px solid $who-blue; }
+.bslib-value-box .value-box-title { color: #52607A; font-size: .9rem; }
+.bslib-value-box .value-box-value { color: $who-navy; font-weight: 700; }
+.bslib-value-box .value-box-showcase { color: $who-blue; opacity: .8; }
+.bslib-value-box p { color: #52607A; font-size: .82rem; margin-bottom: 0; }
+.vb-navy   { border-left-color: $who-navy !important; }
+.vb-green  { border-left-color: $who-green !important; }
+.vb-amber  { border-left-color: $who-amber !important; }
+.vb-orange { border-left-color: $who-orange !important; }
+.who-note { color: #52607A; font-size: .85rem; }
+.who-badge { display: inline-block; background: #E6F5FC; color: $who-navy; border-radius: 3px; padding: 1px 8px; font-size: .8rem; }
+.btn-download { background: $who-navy; color: #fff !important; border-radius: 4px; padding: 8px 16px; font-weight: 600; text-decoration: none; display: inline-block; }
+.btn-download:hover { background: $who-blue; }
+.legend-swatch { display: inline-block; width: 14px; height: 14px; vertical-align: -2px; margin-right: 4px; border: 1px solid #ccc; }
+table.dataTable td { font-size: .85rem; }
+.navbar .nav-link { white-space: nowrap; }
