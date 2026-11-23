@@ -13,7 +13,7 @@ format:
         href: mailto:chaillona@who.int
         aria-label: Contact
 params:
-  data_dir: "data"            # folder holding the exports from the dataform
+  data_dir: "./report/data"            # folder holding the exports from the dataform
   results_file: ""            # "" = newest results-survey*.csv in data_dir
   participants_file: ""       # optional; "" = newest tokens_*.csv in data_dir (gives the invited denominator)
   show_personal: true         # false = no free-text comments, no names, no Excel download
@@ -84,8 +84,8 @@ OUTCOMES <- OUTCOMES[!is.na(column)]
 
 g <- function(c) if (is.na(c)) rep(NA_character_, nrow(R)) else as.character(R[[c]])
 resp <- data.table(token = g(c_token), submitted = as.POSIXct(g(c_submit), tz = "UTC", format = "%Y-%m-%d %H:%M:%S"),
-                   comment = trimws(gsub("\\s+", " ", g(c_comment))))
-for (i in seq_len(nrow(OUTCOMES))) set(resp, j = OUTCOMES$code[i], value = as.integer(sub("^A", "", g(OUTCOMES$column[i]))))
+                   comment = trimws(gsub("[ \t]+", " ", gsub("\r", "", g(c_comment)))))
+for (i in seq_len(nrow(OUTCOMES))) set(resp, j = OUTCOMES$code[i], value = as.numeric(sub("^A", "", g(OUTCOMES$column[i]))))
 excl <- trimws(strsplit(params$exclude_tokens, "[,;[:space:]]+")[[1]]); excl <- excl[excl != ""]
 n_started <- nrow(resp[!is.na(token) | TRUE])
 resp <- resp[!is.na(submitted) & !token %chin% excl][order(submitted)]
@@ -100,7 +100,7 @@ long <- long[!is.na(score)][OUTCOMES[, .(code, outcome)], on = "code", nomatch =
 long[, tier := factor(fcase(score >= 7, TIERS[3], score >= 4, TIERS[2], default = TIERS[1]), levels = TIERS)]
 
 cin <- params$consensus_in_tier; cop <- params$consensus_max_opposite
-S <- long[, .(n = .N, median = median(score), q1 = quantile(score, .25), q3 = quantile(score, .75), mean = mean(score),
+S <- long[, .(n = .N, median = as.numeric(median(score)), q1 = as.numeric(quantile(score, .25)), q3 = as.numeric(quantile(score, .75)), mean = mean(score),
               pct_lim = 100 * mean(score <= 3), pct_imp = 100 * mean(score >= 4 & score <= 6), pct_crit = 100 * mean(score >= 7)),
           by = .(code, outcome)]
 S[, grade := fcase(median >= 7, "Critical", median >= 4, "Important", default = "Limited importance")]
@@ -309,6 +309,7 @@ if (!params$show_personal) {
   p(class = "who-note", "No comments so far.")
 } else {
   tags$table(class = "table table-sm", tags$tbody(lapply(seq_len(nrow(comments)), function(i)
-    tags$tr(tags$td(style = "width:90px;color:#52607A;white-space:nowrap;", comments$Rater[i]), tags$td(comments$Comment[i])))))
+    tags$tr(tags$td(style = "width:90px;color:#52607A;white-space:nowrap;vertical-align:top;", comments$Rater[i]),
+            tags$td(style = "white-space:pre-line;", comments$Comment[i])))))
 }
 ```
